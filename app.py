@@ -2,8 +2,14 @@ import streamlit as st
 import xml.etree.ElementTree as ET
 from io import BytesIO
 
-st.set_page_config(page_title="Nettoyage XML", page_icon="🗑️", layout="wide")
+# Configuration de la page
+st.set_page_config(
+    page_title="Nettoyage XML",
+    page_icon="🗑️",
+    layout="wide"
+)
 
+# Titre et description
 st.title("🗑️ Suppression automatique des balises Rates")
 st.markdown("**Supprime les blocs `<Rates>` avec `rateType='pay'`, `rateStatus='agreed'` et `<Class>Coeff Fixe</Class>`**")
 
@@ -13,10 +19,6 @@ uploaded_file = st.file_uploader("📁 Déposez votre fichier XML", type=['xml']
 if uploaded_file is not None:
     try:
         # Lecture du fichier XML
-        content = uploaded_file.read()
-        uploaded_file.seek(0)
-        
-        # Parse XML
         tree = ET.parse(uploaded_file)
         root = tree.getroot()
         
@@ -42,8 +44,12 @@ if uploaded_file is not None:
                     rates_to_remove.append(rates)
         
         with col2:
-            st.metric("Balises à supprimer (Coeff Fixe)", len(rates_to_remove), 
-                     delta=f"-{len(rates_to_remove)}", delta_color="inverse")
+            st.metric(
+                "Balises à supprimer (Coeff Fixe)", 
+                len(rates_to_remove), 
+                delta=f"-{len(rates_to_remove)}", 
+                delta_color="inverse"
+            )
         
         if len(rates_to_remove) > 0:
             st.warning(f"⚠️ {len(rates_to_remove)} balise(s) 'Coeff Fixe' détectée(s) et prête(s) à être supprimée(s)")
@@ -53,8 +59,12 @@ if uploaded_file is not None:
                 for idx, rates in enumerate(rates_to_remove[:5], 1):
                     start_date = rates.find('.//StartDate')
                     amount = rates.find('.//Amount')
-                    st.code(f"Bloc {idx}: StartDate={start_date.text if start_date is not None else 'N/A'}, "
-                           f"Amount={amount.text if amount is not None else 'N/A'}", language="text")
+                    start_text = start_date.text if start_date is not None else 'N/A'
+                    amount_text = amount.text if amount is not None else 'N/A'
+                    st.code(
+                        f"Bloc {idx}: StartDate={start_text}, Amount={amount_text}", 
+                        language="text"
+                    )
                 if len(rates_to_remove) > 5:
                     st.info(f"... et {len(rates_to_remove) - 5} autre(s)")
             

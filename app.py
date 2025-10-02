@@ -9,51 +9,31 @@ st.set_page_config(
     layout="wide"
 )
 
+# Enregistrer les namespaces pour les préserver
+ET.register_namespace('', 'http://ns.hr-xml.org/2007-04-15')
+
 # Titre et description
 st.title("🗑️ Suppression automatique des balises Rates")
-st.markdown("**Supprime les blocs `<Rates>` avec `rateType='pay'`, `rateStatus='agreed'` et `<Class>Coeff Fixe</Class>`**")
+st.markdown("**Supprime les blocs `<Rates>` avec `rateStatus='agreed'` et `<Class>Coeff Fixe</Class>`**")
 
 # Upload du fichier XML
 uploaded_file = st.file_uploader("📁 Déposez votre fichier XML", type=['xml'])
 
 if uploaded_file is not None:
     try:
-        # Lecture du fichier XML
+        # Lire le contenu original pour préserver le format
+        content = uploaded_file.read()
+        uploaded_file.seek(0)
+        
+        # Parser le XML
         tree = ET.parse(uploaded_file)
         root = tree.getroot()
         
-        # Extraire le namespace s'il existe
-        namespace = ''
-        if root.tag.startswith('{'):
-            namespace = root.tag.split('}')[0] + '}'
+        # Détecter le namespace
+        ns = {'hr': 'http://ns.hr-xml.org/2007-04-15'}
         
-        # Debug: afficher le namespace et la structure
-        with st.expander("🔧 Debug - Information XML"):
-            st.code(f"Namespace détecté: '{namespace}'")
-            st.code(f"Root tag: {root.tag}")
-            st.code(f"Nombre d'éléments racine: {len(list(root))}")
-        
-        # Fonction pour chercher avec ou sans namespace
-        def find_all_rates(root, namespace):
-            if namespace:
-                return root.findall(f".//{namespace}Rates")
-            else:
-                return root.findall(".//Rates")
-        
-        # Trouver toutes les balises Rates
-        all_rates = find_all_rates(root, namespace)
-        
-        # Si aucune balise trouvée avec namespace, essayer sans
-        if len(all_rates) == 0 and namespace:
-            all_rates = root.findall(".//Rates")
-            namespace = ''
-        
-        # Si toujours aucune, essayer de parcourir tous les éléments
-        if len(all_rates) == 0:
-            all_rates = []
-            for elem in root.iter():
-                if elem.tag.endswith('Rates') or elem.tag == 'Rates':
-                    all_rates.append(elem)
+        # Trouver toutes les balises Rates avec namespace
+        all_rates = root.findall('.//{http://ns.hr-xml.org/2007-04-15}Rates')
         
         col1, col2 = st.columns(2)
         
@@ -63,34 +43,14 @@ if uploaded_file is not None:
         # Identifier les balises à supprimer
         rates_to_remove = []
         for rates in all_rates:
-            rate_type = rates.get('rateType')
             rate_status = rates.get('rateStatus')
             
-            # Debug: afficher les attributs
-            if len(rates_to_remove) < 3:
-                with st.expander(f"🔍 Debug - Rates #{len(rates_to_remove) + 1}"):
-                    st.code(f"rateType: {rate_type}")
-                    st.code(f"rateStatus: {rate_status}")
-                    for child in rates:
-                        child_tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
-                        st.code(f"{child_tag}: {child.text}")
-            
-            # Vérifier si c'est agreed (pay OU bill)
+            # Vérifier si c'est agreed
             if rate_status == 'agreed':
-                # Chercher Class avec ou sans namespace
-                class_elem = None
-                if namespace:
-                    class_elem = rates.find(f".//{namespace}Class")
-                if class_elem is None:
-                    class_elem = rates.find(".//Class")
-                if class_elem is None:
-                    for child in rates:
-                        if child.tag.endswith('Class') or child.tag == 'Class':
-                            class_elem = child
-                            break
+                # Chercher <Class>Coeff Fixe</Class>
+                class_elem = rates.find('{http://ns.hr-xml.org/2007-04-15}Class')
                 
                 if class_elem is not None and class_elem.text:
-                    # Nettoyer les espaces avant/après
                     class_text = class_elem.text.strip()
                     if class_text == 'Coeff Fixe':
                         rates_to_remove.append(rates)
@@ -104,33 +64,18 @@ if uploaded_file is not None:
             )
         
         if len(rates_to_remove) > 0:
-            st.warning(f"⚠️ {len(rates_to_remove)} balise(s) 'Coeff Fixe' détectée(s) et prête(s) à être supprimée(s)")
+            st.warning(f"⚠️ {len(rates_to_remove)} balise(s) 'Coeff Fixe' détectée(s)")
             
-            # Afficher un aperçu des éléments à supprimer
+            # Aperçu des éléments à supprimer
             with st.expander("🔍 Aperçu des balises qui seront supprimées"):
                 for idx, rates in enumerate(rates_to_remove[:5], 1):
-                    # Chercher avec namespace si nécessaire
-                    if namespace:
-                        start_date = rates.find(f".//{namespace}StartDate")
-                        amount = rates.find(f".//{namespace}Amount")
-                    else:
-                        start_date = rates.find(".//StartDate")
-                        amount = rates.find(".//Amount")
-                    
-                    # Fallback: chercher sans namespace
-                    if start_date is None:
-                        for child in rates.iter():
-                            if child.tag.endswith('StartDate'):
-                                start_date = child
-                            if child.tag.endswith('Amount'):
-                                amount = child
+                    start_date = rates.find('{http://ns.hr-xml.org/2007-04-15}StartDate')
+                    amount = rates.find('{http://ns.hr-xml.org/2007-04-15}Amount')
                     
                     start_text = start_date.text if start_date is not None else 'N/A'
                     amount_text = amount.text if amount is not None else 'N/A'
-                    st.code(
-                        f"Bloc {idx}: StartDate={start_text}, Amount={amount_text}", 
-                        language="text"
-                    )
+                    st.code(f"Bloc {idx}: StartDate={start_text}, Amount={amount_text}")
+                    
                 if len(rates_to_remove) > 5:
                     st.info(f"... et {len(rates_to_remove) - 5} autre(s)")
             
@@ -143,22 +88,23 @@ if uploaded_file is not None:
                             parent.remove(rates)
                             removed_count += 1
                 
-                st.success(f"✅ {removed_count} balise(s) supprimée(s) avec succès !")
+                st.success(f"✅ {removed_count} balise(s) supprimée(s) !")
                 
-                # Conversion en string XML
-                ET.indent(tree, space="  ")
-                xml_string = ET.tostring(root, encoding='utf-8', xml_declaration=True)
+                # Écrire le XML en préservant le format original
+                xml_bytes = BytesIO()
+                tree.write(xml_bytes, encoding='utf-8', xml_declaration=True, method='xml')
+                xml_string = xml_bytes.getvalue()
                 
-                # Afficher statistiques finales
-                remaining_rates = len(find_all_rates(root, namespace))
+                # Statistiques finales
+                remaining_rates = len(root.findall('.//{http://ns.hr-xml.org/2007-04-15}Rates'))
                 st.info(f"📊 Balises <Rates> restantes : {remaining_rates}")
                 
-                # Aperçu du résultat
-                with st.expander("📄 Aperçu du XML modifié (50 premières lignes)"):
+                # Aperçu
+                with st.expander("📄 Aperçu du XML (50 premières lignes)"):
                     preview = xml_string.decode('utf-8').split('\n')[:50]
                     st.code('\n'.join(preview), language='xml')
                 
-                # Bouton de téléchargement
+                # Téléchargement
                 original_filename = uploaded_file.name
                 new_filename = original_filename.replace('.xml', '_cleaned.xml')
                 
@@ -171,25 +117,19 @@ if uploaded_file is not None:
                     use_container_width=True
                 )
         else:
-            st.success("✅ Aucune balise 'Coeff Fixe' à supprimer dans ce fichier !")
+            st.success("✅ Aucune balise 'Coeff Fixe' à supprimer !")
             
-    except ET.ParseError as e:
-        st.error(f"❌ Erreur de parsing XML : {str(e)}")
     except Exception as e:
         st.error(f"❌ Erreur : {str(e)}")
         import traceback
         st.code(traceback.format_exc())
 else:
-    st.info("👆 Veuillez uploader un fichier XML pour commencer")
+    st.info("👆 Veuillez uploader un fichier XML")
     
-    # Instructions
-    with st.expander("ℹ️ Comment utiliser cette application"):
+    with st.expander("ℹ️ Mode d'emploi"):
         st.markdown("""
         1. **Uploadez** votre fichier XML
-        2. L'application détecte automatiquement les balises `<Rates>` avec :
-           - `rateType="pay"` ou `rateType="bill"`
-           - `rateStatus="agreed"`
-           - `<Class>Coeff Fixe</Class>`
+        2. Vérifiez les balises détectées
         3. Cliquez sur **SUPPRIMER LES BALISES**
         4. **Téléchargez** le fichier nettoyé
         """)

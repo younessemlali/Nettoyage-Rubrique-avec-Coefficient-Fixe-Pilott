@@ -36,12 +36,15 @@ if uploaded_file is not None:
             rate_type = rates.get('rateType')
             rate_status = rates.get('rateStatus')
             
-            # Vérifier si c'est pay + agreed
-            if rate_type == 'pay' and rate_status == 'agreed':
+            # Vérifier si c'est agreed (pay OU bill)
+            if rate_status == 'agreed':
                 # Vérifier si contient <Class>Coeff Fixe</Class>
                 class_elem = rates.find('.//Class')
-                if class_elem is not None and class_elem.text == 'Coeff Fixe':
-                    rates_to_remove.append(rates)
+                if class_elem is not None and class_elem.text:
+                    # Nettoyer les espaces avant/après
+                    class_text = class_elem.text.strip()
+                    if class_text == 'Coeff Fixe':
+                        rates_to_remove.append(rates)
         
         with col2:
             st.metric(

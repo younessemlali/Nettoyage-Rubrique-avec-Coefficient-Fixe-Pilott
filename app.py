@@ -1,6 +1,7 @@
 import streamlit as st
 import xml.etree.ElementTree as ET
 from io import BytesIO
+import re
 
 # Configuration de la page
 st.set_page_config(
@@ -9,100 +10,88 @@ st.set_page_config(
     layout="wide"
 )
 
-# Enregistrer les namespaces pour les préserver
-ET.register_namespace('', 'http://ns.hr-xml.org/2007-04-15')
-
-# Titre et description
+# Titre
 st.title("🗑️ Suppression automatique des balises Rates")
 st.markdown("**Supprime les blocs `<Rates>` avec `rateStatus='agreed'` et `<Class>Coeff Fixe</Class>`**")
 
-# Upload du fichier XML
+# Upload
 uploaded_file = st.file_uploader("📁 Déposez votre fichier XML", type=['xml'])
 
 if uploaded_file is not None:
     try:
-        # Lire le contenu original pour préserver le format
-        content = uploaded_file.read()
-        uploaded_file.seek(0)
+        # Lire le contenu brut
+        content = uploaded_file.read().decode('utf-8')
         
-        # Parser le XML
-        tree = ET.parse(uploaded_file)
-        root = tree.getroot()
-        
-        # Détecter le namespace
-        ns = {'hr': 'http://ns.hr-xml.org/2007-04-15'}
-        
-        # Trouver toutes les balises Rates avec namespace
-        all_rates = root.findall('.//{http://ns.hr-xml.org/2007-04-15}Rates')
+        # Chercher tous les blocs <Rates>...</Rates> avec regex
+        # Pattern pour capturer un bloc Rates complet
+        pattern = r'<Rates[^>]*rateStatus=["\']agreed["\'][^>]*>.*?</Rates>'
+        all_rates_matches = list(re.finditer(pattern, content, re.DOTALL))
         
         col1, col2 = st.columns(2)
         
         with col1:
-            st.metric("Total de balises <Rates>", len(all_rates))
+            st.metric("Total de balises <Rates> avec agreed", len(all_rates_matches))
         
-        # Identifier les balises à supprimer
-        rates_to_remove = []
-        for rates in all_rates:
-            rate_status = rates.get('rateStatus')
-            
-            # Vérifier si c'est agreed
-            if rate_status == 'agreed':
-                # Chercher <Class>Coeff Fixe</Class>
-                class_elem = rates.find('{http://ns.hr-xml.org/2007-04-15}Class')
-                
-                if class_elem is not None and class_elem.text:
-                    class_text = class_elem.text.strip()
-                    if class_text == 'Coeff Fixe':
-                        rates_to_remove.append(rates)
+        # Identifier ceux qui contiennent "Coeff Fixe"
+        rates_to_remove_indices = []
+        for idx, match in enumerate(all_rates_matches):
+            bloc = match.group(0)
+            if '<Class>Coeff Fixe</Class>' in bloc or '<Class> Coeff Fixe </Class>' in bloc:
+                rates_to_remove_indices.append(idx)
         
         with col2:
             st.metric(
                 "Balises à supprimer (Coeff Fixe)", 
-                len(rates_to_remove), 
-                delta=f"-{len(rates_to_remove)}" if len(rates_to_remove) > 0 else "0", 
+                len(rates_to_remove_indices),
+                delta=f"-{len(rates_to_remove_indices)}" if len(rates_to_remove_indices) > 0 else "0",
                 delta_color="inverse"
             )
         
-        if len(rates_to_remove) > 0:
-            st.warning(f"⚠️ {len(rates_to_remove)} balise(s) 'Coeff Fixe' détectée(s)")
+        if len(rates_to_remove_indices) > 0:
+            st.warning(f"⚠️ {len(rates_to_remove_indices)} balise(s) 'Coeff Fixe' détectée(s)")
             
-            # Aperçu des éléments à supprimer
-            with st.expander("🔍 Aperçu des balises qui seront supprimées"):
-                for idx, rates in enumerate(rates_to_remove[:5], 1):
-                    start_date = rates.find('{http://ns.hr-xml.org/2007-04-15}StartDate')
-                    amount = rates.find('{http://ns.hr-xml.org/2007-04-15}Amount')
-                    
-                    start_text = start_date.text if start_date is not None else 'N/A'
-                    amount_text = amount.text if amount is not None else 'N/A'
-                    st.code(f"Bloc {idx}: StartDate={start_text}, Amount={amount_text}")
-                    
-                if len(rates_to_remove) > 5:
-                    st.info(f"... et {len(rates_to_remove) - 5} autre(s)")
+            # Aperçu
+            with st.expander("🔍 Aperçu des balises à supprimer"):
+                for i, idx in enumerate(rates_to_remove_indices[:5], 1):
+                    bloc = all_rates_matches[idx].group(0)
+                    # Extraire StartDate et Amount
+                    start_match = re.search(r'<StartDate>([^<]+)</StartDate>', bloc)
+                    amount_match = re.search(r'<Amount[^>]*>([^<]+)</Amount>', bloc)
+                    start = start_match.group(1) if start_match else 'N/A'
+                    amount = amount_match.group(1) if amount_match else 'N/A'
+                    st.code(f"Bloc {i}: StartDate={start}, Amount={amount}")
+                if len(rates_to_remove_indices) > 5:
+                    st.info(f"... et {len(rates_to_remove_indices) - 5} autre(s)")
             
             if st.button("🗑️ SUPPRIMER LES BALISES", type="primary", use_container_width=True):
-                # Suppression des balises
-                removed_count = 0
-                for rates in rates_to_remove:
-                    for parent in root.iter():
-                        if rates in list(parent):
-                            parent.remove(rates)
-                            removed_count += 1
+                # Supprimer les blocs en partant de la fin pour ne pas décaler les indices
+                modified_content = content
+                for idx in sorted(rates_to_remove_indices, reverse=True):
+                    match = all_rates_matches[idx]
+                    # Supprimer le bloc entier incluant les espaces/indentation avant
+                    start = match.start()
+                    end = match.end()
+                    
+                    # Trouver le début de la ligne (pour garder l'indentation propre)
+                    line_start = modified_content.rfind('\n', 0, start)
+                    if line_start != -1:
+                        # Vérifier si entre line_start et start il n'y a que des espaces
+                        between = modified_content[line_start:start]
+                        if between.strip() == '':
+                            start = line_start
+                    
+                    modified_content = modified_content[:start] + modified_content[end:]
                 
-                st.success(f"✅ {removed_count} balise(s) supprimée(s) !")
+                st.success(f"✅ {len(rates_to_remove_indices)} balise(s) supprimée(s) !")
                 
-                # Écrire le XML en préservant le format original
-                xml_bytes = BytesIO()
-                tree.write(xml_bytes, encoding='utf-8', xml_declaration=True, method='xml')
-                xml_string = xml_bytes.getvalue()
-                
-                # Statistiques finales
-                remaining_rates = len(root.findall('.//{http://ns.hr-xml.org/2007-04-15}Rates'))
-                st.info(f"📊 Balises <Rates> restantes : {remaining_rates}")
+                # Compter les Rates restants
+                remaining = len(re.findall(r'<Rates[^>]*>', modified_content))
+                st.info(f"📊 Balises <Rates> restantes : {remaining}")
                 
                 # Aperçu
-                with st.expander("📄 Aperçu du XML (50 premières lignes)"):
-                    preview = xml_string.decode('utf-8').split('\n')[:50]
-                    st.code('\n'.join(preview), language='xml')
+                with st.expander("📄 Aperçu du XML modifié (50 premières lignes)"):
+                    preview_lines = modified_content.split('\n')[:50]
+                    st.code('\n'.join(preview_lines), language='xml')
                 
                 # Téléchargement
                 original_filename = uploaded_file.name
@@ -110,7 +99,7 @@ if uploaded_file is not None:
                 
                 st.download_button(
                     label="📥 Télécharger le fichier nettoyé",
-                    data=xml_string,
+                    data=modified_content.encode('utf-8'),
                     file_name=new_filename,
                     mime="application/xml",
                     type="primary",

@@ -19,8 +19,21 @@ uploaded_file = st.file_uploader("📁 Déposez votre fichier XML", type=['xml']
 
 if uploaded_file is not None:
     try:
-        # Lire le contenu brut
-        content = uploaded_file.read().decode('utf-8')
+        # Lire le contenu brut avec détection automatique de l'encodage
+        raw_content = uploaded_file.read()
+        
+        # Essayer différents encodages
+        content = None
+        for encoding in ['utf-8', 'iso-8859-1', 'windows-1252', 'latin-1']:
+            try:
+                content = raw_content.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        
+        if content is None:
+            st.error("❌ Impossible de décoder le fichier. Encodage non supporté.")
+            st.stop()
         
         # Chercher tous les blocs <Rates>...</Rates> avec regex
         # Pattern pour capturer un bloc Rates complet

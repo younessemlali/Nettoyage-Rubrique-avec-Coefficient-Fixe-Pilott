@@ -9,8 +9,8 @@ st.set_page_config(
 )
 
 # Titre
-st.title("🗑️ Suppression automatique des balises Rates")
-st.markdown("**Supprime tous les blocs `<Rates>` contenant `<Class>Coeff Fixe</Class>` (pay et bill)**")
+st.title("🗑️ Suppression automatique des groupes Rates")
+st.markdown("**Supprime les groupes de balises `<Rates>` (pay + bill) contenant `<Class>Coeff Fixe</Class>`**")
 
 # Upload
 uploaded_file = st.file_uploader("📂 Déposez votre fichier XML", type=['xml'])
@@ -33,55 +33,68 @@ if uploaded_file is not None:
             st.error("❌ Impossible de décoder le fichier. Encodage non supporté.")
             st.stop()
         
-        # Pattern pour capturer TOUS les blocs <Rates>...</Rates>
-        pattern = r'<Rates[^>]*>.*?</Rates>'
-        all_rates_matches = list(re.finditer(pattern, content, re.DOTALL))
+        # Pattern pour capturer les GROUPES de 2 balises Rates consécutives avec Coeff Fixe
+        # On cherche: <Rates rateType="pay"...>...</Rates> suivi de <Rates rateType="bill"...>...</Rates>
+        # où les deux contiennent <Class>Coeff Fixe</Class>
+        pattern = r'(<Rates\s+rateType="pay"[^>]*>.*?</Rates>)\s*(<Rates\s+rateType="bill"[^>]*>.*?</Rates>)'
+        
+        all_groups = list(re.finditer(pattern, content, re.DOTALL))
         
         col1, col2 = st.columns(2)
         
         with col1:
-            st.metric("Total de balises <Rates>", len(all_rates_matches))
+            st.metric("Groupes pay+bill détectés", len(all_groups))
         
-        # Identifier ceux qui contiennent "Coeff Fixe"
-        rates_to_remove = []
-        for match in all_rates_matches:
-            bloc = match.group(0)
-            if '<Class>Coeff Fixe</Class>' in bloc or '<Class> Coeff Fixe </Class>' in bloc:
-                rates_to_remove.append(match)
+        # Identifier les groupes qui contiennent "Coeff Fixe" dans LES DEUX balises
+        groups_to_remove = []
+        for match in all_groups:
+            pay_bloc = match.group(1)
+            bill_bloc = match.group(2)
+            
+            # Vérifier si les DEUX blocs contiennent "Coeff Fixe"
+            has_coeff_fixe_pay = '<Class>Coeff Fixe</Class>' in pay_bloc or '<Class> Coeff Fixe </Class>' in pay_bloc
+            has_coeff_fixe_bill = '<Class>Coeff Fixe</Class>' in bill_bloc or '<Class> Coeff Fixe </Class>' in bill_bloc
+            
+            if has_coeff_fixe_pay and has_coeff_fixe_bill:
+                groups_to_remove.append(match)
         
         with col2:
             st.metric(
-                "Balises à supprimer (Coeff Fixe)", 
-                len(rates_to_remove),
-                delta=f"-{len(rates_to_remove)}" if len(rates_to_remove) > 0 else "0",
+                "Groupes à supprimer (Coeff Fixe)", 
+                len(groups_to_remove),
+                delta=f"-{len(groups_to_remove) * 2} balises" if len(groups_to_remove) > 0 else "0",
                 delta_color="inverse"
             )
         
-        if len(rates_to_remove) > 0:
-            st.warning(f"⚠️ {len(rates_to_remove)} balise(s) 'Coeff Fixe' détectée(s)")
+        if len(groups_to_remove) > 0:
+            st.warning(f"⚠️ {len(groups_to_remove)} groupe(s) 'Coeff Fixe' détecté(s) ({len(groups_to_remove) * 2} balises au total)")
             
-            # Aperçu avec détection du type (pay/bill)
-            with st.expander("🔍 Aperçu des balises à supprimer"):
-                for i, match in enumerate(rates_to_remove[:10], 1):
-                    bloc = match.group(0)
-                    # Extraire le type
-                    type_match = re.search(r'rateType="([^"]+)"', bloc)
-                    rate_type = type_match.group(1) if type_match else 'N/A'
-                    # Extraire StartDate et Amount
-                    start_match = re.search(r'<StartDate>([^<]+)</StartDate>', bloc)
-                    amount_match = re.search(r'<Amount[^>]*>([^<]+)</Amount>', bloc)
-                    start = start_match.group(1) if start_match else 'N/A'
-                    amount = amount_match.group(1) if amount_match else 'N/A'
-                    st.code(f"Bloc {i}: Type={rate_type}, StartDate={start}, Amount={amount}")
-                if len(rates_to_remove) > 10:
-                    st.info(f"... et {len(rates_to_remove) - 10} autre(s)")
+            # Aperçu
+            with st.expander("🔍 Aperçu des groupes à supprimer"):
+                for i, match in enumerate(groups_to_remove[:5], 1):
+                    pay_bloc = match.group(1)
+                    bill_bloc = match.group(2)
+                    
+                    # Extraire infos du bloc pay
+                    start_pay = re.search(r'<StartDate>([^<]+)</StartDate>', pay_bloc)
+                    amount_pay = re.search(r'<Amount[^>]*>([^<]+)</Amount>', pay_bloc)
+                    
+                    # Extraire infos du bloc bill
+                    amount_bill = re.search(r'<Amount[^>]*>([^<]+)</Amount>', bill_bloc)
+                    
+                    st.code(f"""Groupe {i}:
+  - PAY:  StartDate={start_pay.group(1) if start_pay else 'N/A'}, Amount={amount_pay.group(1) if amount_pay else 'N/A'}
+  - BILL: Amount={amount_bill.group(1) if amount_bill else 'N/A'}""")
+                    
+                if len(groups_to_remove) > 5:
+                    st.info(f"... et {len(groups_to_remove) - 5} autre(s) groupe(s)")
             
-            if st.button("🗑️ SUPPRIMER LES BALISES", type="primary", use_container_width=True):
-                # Supprimer les blocs en partant de la fin pour ne pas décaler les indices
+            if st.button("🗑️ SUPPRIMER LES GROUPES", type="primary", use_container_width=True):
+                # Supprimer les groupes en partant de la fin pour ne pas décaler les indices
                 modified_content = content
                 
                 # Trier les matches par position (du plus loin au plus proche)
-                sorted_matches = sorted(rates_to_remove, key=lambda m: m.start(), reverse=True)
+                sorted_matches = sorted(groups_to_remove, key=lambda m: m.start(), reverse=True)
                 
                 for match in sorted_matches:
                     start = match.start()
@@ -95,10 +108,14 @@ if uploaded_file is not None:
                         if between.strip() == '':
                             start = line_start
                     
-                    # Supprimer le bloc
+                    # Chercher si on doit aussi supprimer la ligne suivante (si vide)
+                    if end < len(modified_content) and modified_content[end:end+1] == '\n':
+                        end += 1
+                    
+                    # Supprimer le groupe entier (pay + bill)
                     modified_content = modified_content[:start] + modified_content[end:]
                 
-                st.success(f"✅ {len(rates_to_remove)} balise(s) supprimée(s) !")
+                st.success(f"✅ {len(groups_to_remove)} groupe(s) supprimé(s) ({len(groups_to_remove) * 2} balises) !")
                 
                 # Compter les Rates restants
                 remaining = len(re.findall(r'<Rates[^>]*>', modified_content))
@@ -122,7 +139,7 @@ if uploaded_file is not None:
                     use_container_width=True
                 )
         else:
-            st.success("✅ Aucune balise 'Coeff Fixe' à supprimer !")
+            st.success("✅ Aucun groupe 'Coeff Fixe' à supprimer !")
             
     except Exception as e:
         st.error(f"❌ Erreur : {str(e)}")
@@ -134,11 +151,13 @@ else:
     with st.expander("ℹ️ Mode d'emploi"):
         st.markdown("""
         1. **Uploadez** votre fichier XML
-        2. Vérifiez les balises détectées (pay + bill)
-        3. Cliquez sur **SUPPRIMER LES BALISES**
+        2. Vérifiez les groupes détectés
+        3. Cliquez sur **SUPPRIMER LES GROUPES**
         4. **Téléchargez** le fichier nettoyé
         
-        ⚠️ **Important** : Ce script supprime TOUTES les balises `<Rates>` 
-        contenant `<Class>Coeff Fixe</Class>`, qu'elles soient de type 
-        "pay" ou "bill".
+        ⚠️ **Important** : Ce script supprime les GROUPES de 2 balises consécutives :
+        - Une balise `<Rates rateType="pay">` avec `<Class>Coeff Fixe</Class>`
+        - Suivie d'une balise `<Rates rateType="bill">` avec `<Class>Coeff Fixe</Class>`
+        
+        Les deux balises du groupe doivent contenir "Coeff Fixe" pour être supprimées.
         """)
